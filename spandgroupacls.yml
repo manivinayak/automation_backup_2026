@@ -1,0 +1,47 @@
+steps:
+
+- task: AzureKeyVault@2
+  displayName: 'Azure Key Vault'
+  inputs:
+    azureSubscription: $(azureSubscription)
+    KeyVaultName: $(KeyVaultName)
+    SecretsFilter: 'gskpscstgkey, gskpscstgacc'
+    
+- task: AzurePowerShell@5
+  displayName: 'Azure PowerShell script: InlineScript'
+  inputs:
+    azureSubscription: $(azureSubscription)
+    ScriptType: InlineScript
+    Inline: |
+     $ctx = New-AzStorageContext -StorageAccountName '$(gskpscstgacc)' -StorageAccountKey '$(gskpscstgkey)'
+     $csvs = Import-Csv -Path $(CSVPath)
+     $ID = $csvs[0].psobject.Properties.Name[0]
+     $filesystemName = "$(filesystemName)"
+     
+     If ( $ID -eq 'GroupName' ) 
+     {
+     foreach ( $csv in $csvs )
+     {
+     $acl = Set-AzDataLakeGen2ItemAclObject -AccessControlType Group -EntityId ($csv.GroupID) -Permission $($csv.Permission)
+     Update-AzDataLakeGen2AclRecursive -Context $ctx -FileSystem $filesystemName -Path ($csv.Path) -Acl $acl
+     $acl = Set-AzDataLakeGen2ItemAclObject -AccessControlType Group -EntityId ($csv.GroupID) -Permission $($csv.Permission) -InputObject $acl -DefaultScope
+     Update-AzDataLakeGen2AclRecursive -Context $ctx -FileSystem $filesystemName -Path ($csv.Path) -Acl $acl
+     Write-Host ("Updated storage account '$(gskpscstgacc)' with FileSystem  '$filesystemName' under the Path '$($csv.Path)' with Group Name") -Separator " -> " $csv.GroupName
+     }
+     }
+     elseif ( $ID -eq 'SPName' )
+     {
+     foreach ( $csv in $csvs )
+     {
+     $acl = Set-AzDataLakeGen2ItemAclObject -AccessControlType User -EntityId ($csv.SPID) -Permission $($csv.Permission)
+     Update-AzDataLakeGen2AclRecursive -Context $ctx -FileSystem $filesystemName -Path ($csv.Path) -Acl $acl
+     $acl = Set-AzDataLakeGen2ItemAclObject -AccessControlType User -EntityId ($csv.SPID) -Permission $($csv.Permission) -InputObject $acl -DefaultScope
+     Update-AzDataLakeGen2AclRecursive -Context $ctx -FileSystem $filesystemName -Path ($csv.Path) -Acl $acl
+     Write-Host ("Updated storage account '$(gskpscstgacc)' with FileSystem  '$filesystemName' under the Path '$($csv.Path)' with SP Name") -Separator " -> " $csv.SPName
+     }
+     }
+     else
+     {
+     Write-Host ("Invalid Template")
+     }
+    azurePowerShellVersion: LatestVersion
