@@ -1,0 +1,78 @@
+trigger:
+- none
+
+pool: 'GSK Hosted Windows'
+
+variables:
+- template: config/ACLs_Env_Variable_Build.yml
+- group: PSC-DevTest-VarGroup
+
+stages:      
+- stage: ACL_Build
+  jobs:
+  - deployment: ACLBuild
+    timeoutInMinutes: 0
+    variables:
+    - template: config/ACLs_Env_Variable_Build.yml
+    - group: PSC-DevTest-VarGroup
+    displayName: ACLBuild
+    environment: 'PSC-ACL-Build'
+    strategy:
+        runOnce:
+          deploy:
+            steps:
+            - checkout: self
+            - ${{ if eq(variables.ACLs, true) }}:
+              - template: Components/ACLS/ACLsBuild.yml
+
+- stage: ACL_DEV_Deploy
+  jobs:
+  - deployment: ACL_Deployment_DEV
+    timeoutInMinutes: 0
+    variables:
+    - template: config/ACLs_Env_Variable_DevTest.yml
+    - group: PSC-DevTest-VarGroup
+    displayName: ACLDEVdeploy
+    environment: 'PSC-ACL-DEV-Deploy'
+    strategy:
+       runOnce:
+          deploy:
+            steps:
+            - checkout: self
+            - ${{ if eq(variables.ACLs, true) }}:
+              - template: Components/ACLS/spandgroupacls.yml
+
+
+- stage: ACL_UAT_Deploy
+  jobs:
+  - deployment: ACL_Deployment_UAT
+    timeoutInMinutes: 0
+    variables:
+    - template: config/ACLs_Env_Variable_UAT.yml
+    - group: PSC-UAT-VarGroup
+    displayName: ACLUATdeploy
+    environment: 'PSC-ACL-UAT-Deploy'
+    strategy:
+        runOnce:
+          deploy:
+            steps:
+            - checkout: self
+            - ${{ if eq(variables.ACLs, true) }}:
+              - template: Components/ACLS/spandgroupacls.yml
+
+- stage: ACL_PROD_Deploy 
+  jobs:
+  - deployment: ACL_Deployment_PROD
+    timeoutInMinutes: 0
+    variables:
+    - template: config/ACLs_Env_Variable_PROD.yml
+    - group: PSC-PROD-VarGroup
+    displayName: ACLPRODdeploy
+    environment: 'PSC-ACL-PROD-Deploy'
+    strategy:
+        runOnce:
+          deploy:
+            steps:
+            - checkout: self
+            - ${{ if eq(variables.ACLs, true) }}:
+              - template: Components/ACLS/spandgroupacls.yml
