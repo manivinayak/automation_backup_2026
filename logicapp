@@ -1,0 +1,345 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "actions": {
+            "GetDatabricksURL": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "referenceName": "keyvault-2"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/secrets/@{encodeURIComponent('databricks-etl-workspace-url')}/value"
+                },
+                "runAfter": {}
+            },
+            "GetDatabricksPAT": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "referenceName": "keyvault-2"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/secrets/@{encodeURIComponent('MESH-NODE-DATABRICKS-API-TOKEN-ETL')}/value"
+                },
+                "runAfter": {
+                    "GetDatabricksURL": [
+                        "SUCCEEDED"
+                    ]
+                }
+            },
+            "SCIM_Groups_Call": {
+                "type": "Http",
+                "inputs": {
+                    "uri": "@concat(body('GetDatabricksURL')?['value'],'/api/2.0/preview/scim/v2/Groups?filter=',encodeUriComponent(concat('displayName eq ''',triggerBody()?['adGroupName'],'''')))",
+                    "method": "GET",
+                    "headers": {
+                        "Authorization": "@{concat('Bearer ', body('GetDatabricksPAT')?['value'])}",
+                        "Content-Type": "application/json"
+                    }
+                },
+                "runAfter": {
+                    "GetDatabricksPAT": [
+                        "SUCCEEDED"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "contentTransfer": {
+                        "transferMode": "Chunked"
+                    }
+                }
+            },
+            "Condition": {
+                "type": "If",
+                "expression": {
+                    "and": [
+                        {
+                            "greater": [
+                                "@length(coalesce(body('SCIM_Groups_Call')?['Resources'], json('[]')))",
+                                0
+                            ]
+                        }
+                    ]
+                },
+                "actions": {
+                    "HTTP_1": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "@concat(body('GetDatabricksURL')?['value'], '/api/2.0/clusters/list')",
+                            "method": "GET",
+                            "headers": {
+                                "Authorization": "@{concat('Bearer ', body('GetDatabricksPAT')?['value'])}",
+                                "Content-Type": "application/json"
+                            }
+                        },
+                        "runtimeConfiguration": {
+                            "contentTransfer": {
+                                "transferMode": "Chunked"
+                            }
+                        }
+                    },
+                    "Filter_array": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@body('HTTP_1')?['clusters']",
+                            "where": "@equals(item()?['cluster_name'], triggerBody()?['cluster_name'])"
+                        },
+                        "runAfter": {
+                            "HTTP_1": [
+                                "SUCCEEDED"
+                            ]
+                        }
+                    },
+                    "Condition_1": {
+                        "type": "If",
+                        "expression": {
+                            "and": [
+                                {
+                                    "greater": [
+                                        "@length(body('Filter_array'))",
+                                        0
+                                    ]
+                                }
+                            ]
+                        },
+                        "actions": {
+                            "Response_1": {
+                                "type": "Response",
+                                "kind": "Http",
+                                "inputs": {
+                                    "statusCode": 400,
+                                    "body": {
+                                        "message": "Cluster already exists",
+                                        "clusterName": "@{triggerBody()?['cluster_name']}",
+                                        "cluster_id": "@{first(body('Filter_array'))['cluster_id']}"
+                                    }
+                                }
+                            }
+                        },
+                        "else": {
+                            "actions": {
+                                "HTTP_2": {
+                                    "type": "Http",
+                                    "inputs": {
+                                        "uri": "@concat(body('GetDatabricksURL')?['value'], '/api/2.0/clusters/create')",
+                                        "method": "POST",
+                                        "headers": {
+                                            "Authorization": "@{concat('Bearer ', body('GetDatabricksPAT')?['value'])}",
+                                            "Content-Type": "application/json"
+                                        },
+                                        "body": {
+                                            "autoscale": {
+                                                "min_workers": 1,
+                                                "max_workers": 10
+                                            },
+                                            "cluster_name": "@{triggerBody()['cluster_name']}",
+                                            "spark_version": "@{triggerBody()['spark_version']}",
+                                            "spark_conf": {
+                                                "spark.speculation": "true",
+                                                "spark.databricks.delta.preview.enabled": "true"
+                                            },
+                                            "azure_attributes": {
+                                                "first_on_demand": 1,
+                                                "availability": "ON_DEMAND_AZURE",
+                                                "spot_bid_max_price": -1
+                                            },
+                                            "node_type_id": "Standard_DS4_v2",
+                                            "driver_node_type_id": "Standard_DS4_v2",
+                                            "ssh_public_keys": [],
+                                            "custom_tags": {
+                                                "Business Unit": "GSC",
+                                                "Node": "gsc",
+                                                "Environment": "devtest",
+                                                "Business Owner": "@{triggerBody()?['tags']?['Business Owner']}",
+                                                "Technical Owner": "@{triggerBody()?['tags']?['Technical Owner']}",
+                                                "Line Of Business": "@{triggerBody()?['tags']?['Line Of Business']}",
+                                                "Data Domain Name": "@{triggerBody()?['tags']?['Data Domain Name']}",
+                                                "Data Domain Owner": "@{triggerBody()?['tags']?['Data Domain Owner']}",
+                                                "Application Name": "@{triggerBody()?['tags']?['Application Name']}",
+                                                "UseCase": "@{triggerBody()?['tags']?['UseCase']}",
+                                                "CIID": "@{triggerBody()?['tags']?['CIID']}",
+                                                "co_ParentCIID": "@{triggerBody()?['tags']?['co_ParentCIID']}"
+                                            },
+                                            "spark_env_vars": {},
+                                            "autotermination_minutes": 30,
+                                            "enable_elastic_disk": true,
+                                            "data_security_mode": "USER_ISOLATION",
+                                            "num_workers": 1
+                                        }
+                                    },
+                                    "runtimeConfiguration": {
+                                        "contentTransfer": {
+                                            "transferMode": "Chunked"
+                                        }
+                                    }
+                                },
+                                "HTTP_3": {
+                                    "type": "Http",
+                                    "inputs": {
+                                        "uri": "@concat(body('GetDatabricksURL')?['value'], '/api/2.0/permissions/clusters/', body('HTTP_2')?['cluster_id'])",
+                                        "method": "PATCH",
+                                        "headers": {
+                                            "Authorization": "@{concat('Bearer ', body('GetDatabricksPAT')?['value'])}",
+                                            "Content-Type": "application/json"
+                                        },
+                                        "body": {
+                                            "access_control_list": [
+                                                {
+                                                    "group_name": "@{triggerBody()?['adGroupName']}",
+                                                    "permission_level": "CAN_RESTART"
+                                                }
+                                            ]
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "HTTP_2": [
+                                            "SUCCEEDED"
+                                        ]
+                                    }
+                                },
+                                "HTTP_PinCluster": {
+                                    "type": "Http",
+                                    "inputs": {
+                                        "uri": "@concat(body('GetDatabricksURL')?['value'], '/api/2.0/clusters/pin')",
+                                        "method": "POST",
+                                        "headers": {
+                                            "Authorization": "@{concat('Bearer ', body('GetDatabricksPAT')?['value'])}",
+                                            "Content-Type": "application/json"
+                                        },
+                                        "body": {
+                                            "cluster_id": "@{body('HTTP_2')?['cluster_id']}"
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "HTTP_3": [
+                                            "SUCCEEDED"
+                                        ]
+                                    }
+                                },
+                                "Response_2": {
+                                    "type": "Response",
+                                    "kind": "Http",
+                                    "inputs": {
+                                        "statusCode": 200,
+                                        "body": {
+                                            "message": "Cluster created, AD Group assigned and pinned",
+                                            "clusterName": "@{triggerBody()?['cluster_name']}",
+                                            "cluster_id": "@{body('HTTP_2')?['cluster_id']}"
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "HTTP_PinCluster": [
+                                            "SUCCEEDED"
+                                        ]
+                                    }
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "Filter_array": [
+                                "SUCCEEDED"
+                            ]
+                        }
+                    }
+                },
+                "else": {
+                    "actions": {
+                        "Response": {
+                            "type": "Response",
+                            "kind": "Http",
+                            "inputs": {
+                                "statusCode": 400,
+                                "body": {
+                                    "message": "AD Group not found in Databricks Workspace"
+                                }
+                            }
+                        }
+                    }
+                },
+                "runAfter": {
+                    "SCIM_Groups_Call": [
+                        "SUCCEEDED"
+                    ]
+                }
+            }
+        },
+        "outputs": {},
+        "triggers": {
+            "When_a_HTTP_request_is_received": {
+                "type": "Request",
+                "kind": "Http",
+                "inputs": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "cluster_name": {
+                                "type": "string"
+                            },
+                            "spark_version": {
+                                "type": "string"
+                            },
+                            "adGroupName": {
+                                "type": "string"
+                            },
+                            "tags": {
+                                "type": "object",
+                                "properties": {
+                                    "Business Owner": {
+                                        "type": "string"
+                                    },
+                                    "Technical Owner": {
+                                        "type": "string"
+                                    },
+                                    "Line Of Business": {
+                                        "type": "string"
+                                    },
+                                    "Data Domain Name": {
+                                        "type": "string"
+                                    },
+                                    "Data Domain Owner": {
+                                        "type": "string"
+                                    },
+                                    "Application Name": {
+                                        "type": "string"
+                                    },
+                                    "UseCase": {
+                                        "type": "string"
+                                    },
+                                    "CIID": {
+                                        "type": "string"
+                                    },
+                                    "co_ParentCIID": {
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "Business Owner",
+                                    "Technical Owner",
+                                    "Line Of Business",
+                                    "Data Domain Name",
+                                    "Data Domain Owner",
+                                    "Application Name",
+                                    "UseCase",
+                                    "CIID",
+                                    "co_ParentCIID"
+                                ]
+                            }
+                        },
+                        "required": [
+                            "cluster_name",
+                            "spark_version",
+                            "adGroupName",
+                            "tags"
+                        ]
+                    }
+                }
+            }
+        }
+    },
+    "kind": "stateful"
+}
